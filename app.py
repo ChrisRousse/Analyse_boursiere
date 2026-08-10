@@ -109,11 +109,10 @@ smiley_map = {-2: "😭", -1: "😟", 0: "😐", 1: "🙂", 2: "😄"}
 # -- Fonction de chargement de la liste des actions --
 def charger_tickers_euronext_paris(file="data/Euronext_Equities.csv"):
     df = pd.read_csv(file, sep=';')
-    df = df[['Name', 'ISIN', 'Symbol']]
+    df = df[['Name', 'ISIN', 'Symbol','Indice']]
     df = df.copy()
     df = df[df['Symbol'].notna()]
     df = df.reset_index(drop=True)
-    df['Ticker'] = df['Symbol'].astype(str) + ".PA"
     return df
 # -- Fonctions de traduction des données en risque --
 def div_risk_level(div):
@@ -472,19 +471,26 @@ def afficher_extreme(indicateur, valeur, type_score):
 # === APPLICATION ===
 st.set_page_config(layout="wide")
 tickers_paris = charger_tickers_euronext_paris()
+indices = tickers_paris['Indice'].dropna().unique().tolist()
+indices.sort()
+indices = ["Pas de filtre"] + indices
 # -- Sidebar pour le choix de l'action à analyser --
 with st.sidebar:
     st.title("Euronext Paris", width="stretch", text_alignment="left")
     st.header("Choix du titre à analyser")
-    select_ticker = st.dataframe(tickers_paris[['Name', 'ISIN', 'Symbol']],
+    filtre_indice = st.selectbox("Voir uniquement les titres d'un indice", indices)
+    if filtre_indice == 'Pas de filtre':
+        tickers_paris_filtres = tickers_paris
+    else:
+        tickers_paris_filtres = tickers_paris.loc[tickers_paris['Indice'] == filtre_indice].reset_index(drop=True)
+    select_ticker = st.dataframe(tickers_paris_filtres[['Name', 'ISIN', 'Symbol']],
                                  width="content", hide_index=True,
                                  on_select="rerun", selection_mode="single-row")
-selected_ticker = tickers_paris.iloc[select_ticker.selection['rows']]
 # -- Affichage des résultats --
-if len(select_ticker.selection['rows']) == 0:
-    st.header("Choisir le titre à afficher dans la liste sur le côté")
-else:
-    ticker = selected_ticker['Ticker'].iloc[0]
+if select_ticker and select_ticker["selection"]["rows"]:
+    idx = select_ticker["selection"]["rows"][0]   # index de la ligne sélectionnée
+    selected_symbol = tickers_paris_filtres.loc[idx, "Symbol"]
+    ticker = selected_symbol + ".PA"
     try:
         # -- Chargement des données yfinance --
         data = charge_donnees_bourse(ticker)
@@ -645,3 +651,5 @@ else:
                     st.write("Données indisponibles")
     except:
         st.header(f"Données financières indisponibles pour {selected_ticker['Ticker'].iloc[0]} - {selected_ticker['Name'].iloc[0]}")
+else:
+    st.header("Choisir le titre à afficher dans la liste sur le côté")
