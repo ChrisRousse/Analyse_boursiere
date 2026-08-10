@@ -4,3 +4,4 @@ pandas
 yfinance
 streamlit>=1.61.0
 plotly>=4.0.0
+streamlit[charts]
