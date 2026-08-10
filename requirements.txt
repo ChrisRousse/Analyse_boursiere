@@ -2,4 +2,4 @@ numpy
 pandas
 yfinance
 streamlit==1.61.0
-plotly.graph_objects
+streamlit[charts]
