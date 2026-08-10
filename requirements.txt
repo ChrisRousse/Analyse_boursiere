@@ -1,0 +1,6 @@
+types
+numpy
+pandas
+yfinance
+streamlit
+streamlit[charts]
