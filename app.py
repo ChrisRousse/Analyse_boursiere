@@ -476,180 +476,195 @@ indices.sort()
 indices = ["Pas de filtre"] + indices
 # -- Sidebar pour le choix de l'action à analyser --
 with st.sidebar:
-    st.title("Euronext Paris", width="stretch", text_alignment="left")
-    st.header("Choix du titre à analyser")
-    filtre_indice = st.selectbox("Voir uniquement les titres d'un indice", indices)
-    if filtre_indice == 'Pas de filtre':
-        tickers_paris_filtres = tickers_paris
-    else:
-        tickers_paris_filtres = tickers_paris.loc[tickers_paris['Indice'] == filtre_indice].reset_index(drop=True)
-    select_ticker = st.dataframe(tickers_paris_filtres[['Name', 'ISIN', 'Symbol']],
-                                 width="content", hide_index=True,
-                                 on_select="rerun", selection_mode="single-row")
-# -- Affichage des résultats --
-if select_ticker and select_ticker["selection"]["rows"]:
+    with st.container(height="stretch", width="stretch", gap="small", border=False):
+        st.title("🧭 Analyse boursière", width="stretch", text_alignment="left")
+        st.markdown("Saisir le symbole complet du titre à analyser<br>(incluant la place de cotation)", unsafe_allow_html=True)
+        input_ticker = st.text_input("", placeholder="Ex: BNP.PA", label_visibility="collapsed")
+        st.markdown("Ou<br>Sélectionner un titre dans la liste<br>:blue[**Euronext Paris**]", unsafe_allow_html=True)
+        filtre_indice = st.selectbox("🔍 Voir uniquement les titres d'un indice", indices)
+        if filtre_indice == 'Pas de filtre':
+            tickers_paris_filtres = tickers_paris
+        else:
+            tickers_paris_filtres = tickers_paris.loc[tickers_paris['Indice'] == filtre_indice].reset_index(drop=True)
+        select_ticker = st.dataframe(tickers_paris_filtres[['Name', 'ISIN', 'Symbol']],
+                                     height="auto", width="stretch", hide_index=True,
+                                     on_select="rerun", selection_mode="single-row")
+# -- Récupération du titre sélectionné --
+if input_ticker:
+    ticker = input_ticker
+elif select_ticker and select_ticker["selection"]["rows"]:
     idx = select_ticker["selection"]["rows"][0]   # index de la ligne sélectionnée
     selected_symbol = tickers_paris_filtres.loc[idx, "Symbol"]
+    selected_name = tickers_paris_filtres.loc[idx, "Name"]
     ticker = selected_symbol + ".PA"
-    try:
-        # -- Chargement des données yfinance --
-        data = charge_donnees_bourse(ticker)
-        # -- Calcul des scores de performance
-        df_scores = df_seuils.copy()
-        df_scores['valeur'] = df_scores.apply(lambda row: safe_get_value(data.indicateurs, row["indicateur"]), axis=1)
-        df_scores['score'] = df_scores.apply(lambda row: score(row['valeur'], row['obj_min'], row['obj_max'], row['cat_min'], row['cat_max']), axis=1)
-        df_scores_categories = score_categorie(df_scores, df_poids)
-        df_score_global = score_global(df_scores_categories, df_poids)
-        df_extremes = scores_extremes(df_scores)
-        # -- Header --
-        st.title(f"{data.action_suivie.info['longName']}")
-        st.write(f"ISIN: {data.action_suivie.isin} | Symbole: {data.action_suivie.info['symbol']}")
-        # -- corps --
-        with st.container():
-            # -- Partie haute : Affichage données financières et cours du jour
-            with st.container(height=620):
-                col1, col2 = st.columns([0.6, 0.4], gap="small", border=True)
-                # -- Colonne de gauche : Onglets de présentation des données et analyses financières
-                tab1, tab2, tab3, tab4 = col1.tabs(["Indicateurs financiers", "Recommandations", "Informations société", "Définitions"])
-                # -- Indicateurs financiers
-                with tab1.container(gap="xsmall", border=False, width="stretch", height=500):
-                    # -- Indicateurs monétaires
-                    with st.container(horizontal=True, border=True, width="stretch"):
-                        m1, m2, m3, m4 = st.columns(4, width="stretch")
-                        actual = f"{data.day_vue["Close"].iloc[-1]:.{2 if data.day_vue["Close"].iloc[-1] >= 10 else 4}f} €"
-                        evol = data.day_vue["Close"].iloc[-1] / data.day_vue["Close"].iloc[0] - 1
-                        m1.metric("Cours actuel", actual, evol, format="percent")                            
-                        m2.metric('Cours moyen / 1 an', data.indicateurs['Cours moyen / 1 an'], f"{data.indicateurs['Delta cours moyen'].iloc[0] * 100:.2f} %", format="euro")
-                        m3.metric('MA50', data.indicateurs['MA50'], f"{data.indicateurs['Delta MA50'].iloc[0] * 100:.2f} %", format="euro")
-                        m4.metric('ATH / 1 an', data.indicateurs['ATH / 1 an'], f"{data.indicateurs['Delta ATH'].iloc[0] * 100:.2f} %", format="euro")
-                    # -- Dividendes et ratios
-                    with st.container(horizontal=True, border=True, width="stretch"):
-                        d1, r1, r2, r3 = st.columns(4, width="stretch")
-                        d1.metric('Dividendes', data.indicateurs['Dividendes'], format="euro")
-                        r1.metric('Div %', f"{data.indicateurs['Div %'].iloc[0] * 100:.2f} %", icon=data.risque['Div %'].iloc[0])
-                        r2.metric('Rendement', f"{data.indicateurs['Rendement'].iloc[0] * 100:.2f} %", icon=data.risque['Rendement'].iloc[0])
-                        r3.metric('Volatilité', f"{data.indicateurs['Volatilité'].iloc[0] * 100:.2f} %", icon=data.risque['Volatilité'].iloc[0])
-                    # -- Objectifs et recommandations
-                    with st.container(horizontal=True, border=True, width="stretch"):
-                        obj, reco = st.columns(2, width="stretch")
-                        try:
-                            fig_obj = plot_objectif(data.action_suivie)
-                            obj.plotly_chart(fig_obj, width="stretch", height=200, config={"displayModeBar": False})
-                        except:
-                            obj.write("**Objectifs de cours**")
-                            obj.write("Données indisponibles")
-                        try:
-                            fig_reco = plot_recommendations(data.action_suivie)
-                            reco.plotly_chart(fig_reco, width="stretch", height=200, config={"displayModeBar": False})
-                        except:
-                            reco.write("**Recommandations des analystes**")
-                            reco.write("Données indisponibles")
-                # -- Recommandation calculée
-                with tab2.container(gap="xxsmall", border=False, width="stretch", height=500):
-                    df_column_config = {'Recommandation': st.column_config.TextColumn("Recommandation", alignment="center"),
-                                        'Smiley': st.column_config.TextColumn("", alignment="center")}
-                    col_reco1, col_reco2, col_reco3 = st.columns(3, gap="xsmall", border=True)
-                    # -- Recommandation Profil Prudent
-                    with col_reco1:
-                        try:
-                            df_reco = df_score_global[['Recommandation','Smiley']].loc[df_score_global['profil'] == 'prudent']
-                            df_reco = df_reco.style.map(color_reco, subset=['Recommandation'])
-                            df_cat = df_scores_categories[['categorie','score_categorie']].loc[df_scores_categories['profil'] == 'prudent']
-                            fig_cat = plot_categories(df_cat)
-                            st.markdown("🛡️ **Profil Prudent**")
-                            st.dataframe(df_reco, column_config = df_column_config, width="stretch", hide_index=True)
-                            st.plotly_chart(fig_cat, width="stretch", height=140, config={"displayModeBar": False})
-                            df_p = df_extremes[df_extremes['profil'] == 'prudent']
-                            for _, row in df_p.iterrows():
-                                afficher_extreme(indicateur=row['indicateur'], valeur=row['valeur'], type_score=row['type'])
-                        except:
-                            st.markdown("🛡️ **Profil Prudent**")
-                            st.write("Recommandations indisponibles")
-                    # -- Recommandation Profil Equilibré
-                    with col_reco2:
-                        try:
-                            df_reco = df_score_global[['Recommandation','Smiley']].loc[df_score_global['profil'] == 'équilibré']
-                            df_reco = df_reco.style.map(color_reco, subset=['Recommandation'])
-                            df_cat = df_scores_categories[['categorie','score_categorie']].loc[df_scores_categories['profil'] == 'équilibré']
-                            fig_cat = plot_categories(df_cat)
-                            st.markdown("⚖️ **Profil Equilibré**")
-                            st.dataframe(df_reco, column_config = df_column_config, width="stretch", hide_index=True)
-                            st.plotly_chart(fig_cat, width="stretch", height=140, config={"displayModeBar": False})
-                            df_p = df_extremes[df_extremes['profil'] == 'équilibré']
-                            for _, row in df_p.iterrows():
-                                afficher_extreme(indicateur=row['indicateur'], valeur=row['valeur'], type_score=row['type'])
-                        except:
-                            st.markdown("⚖️ **Profil Equilibré**")
-                            st.write("Recommandations indisponibles")
-                    # -- Recommandation Profil Dynamique
-                    with col_reco3:
-                        try:
-                            df_reco = df_score_global[['Recommandation','Smiley']].loc[df_score_global['profil'] == 'dynamique']
-                            df_reco = df_reco.style.map(color_reco, subset=['Recommandation'])
-                            df_cat = df_scores_categories[['categorie','score_categorie']].loc[df_scores_categories['profil'] == 'dynamique']
-                            fig_cat = plot_categories(df_cat)
-                            st.markdown("🚀 **Profil Dynamique**")
-                            st.dataframe(df_reco, column_config = df_column_config, width="stretch", hide_index=True)
-                            st.plotly_chart(fig_cat, width="stretch", height=140, config={"displayModeBar": False})
-                            df_p = df_extremes[df_extremes['profil'] == 'dynamique']
-                            for _, row in df_p.iterrows():
-                                afficher_extreme(indicateur=row['indicateur'], valeur=row['valeur'], type_score=row['type'])
-                        except:
-                            st.markdown("🚀 **Profil Dynamique**")
-                            st.write("Recommandations indisponibles")
-                # -- Informations sur la société
-                with tab3.container(gap="xxsmall", border=False, width="stretch", height=500):
-                    col_info1, col_info2 = st.columns(2, gap="small", border=True)
-                    # -- Informations générales
-                    with col_info1.container(border=False, width="stretch", height=460):
-                        try:
-                            st.subheader(data.action_suivie.info['sectorDisp'])
-                        except:
-                            st.write("Secteur inconnu")
-                        try:
-                            st.write(data.action_suivie.info['longBusinessSummary'])
-                        except:
-                            st.write("Informations indisponibles")
-                    # -- Perspectives CA et EPS
-                    try:
-                        fig_rev = plot_revenue(data.action_suivie)
-                        col_info2.plotly_chart(fig_rev, width="stretch", height=200, config={"displayModeBar": False})
-                    except:
-                        col_info2.write("**Perspectives de croissance du CA**")
-                        col_info2.write("Données indisponibles")
-                    try:
-                        fig_eps = plot_EPS(data.action_suivie)
-                        col_info2.plotly_chart(fig_eps, width="stretch", height=200, config={"displayModeBar": False})
-                    except:
-                        col_info2.write("**Prévisions de Bénéfice par action**")
-                        col_info2.write("Données indisponibles")
-                # -- Définitions des ratios
-                with tab4.container(gap="xxsmall", border=False, width="stretch", height=500):
-                    row1 = st.container(border=True, width="stretch")
-                    row1.markdown(":moneybag: **Div %** = dividendes / cours moyen sur 1 an")
-                    row1.write("Mesure directe des bénéfices pour l'investisseur par rapport au montant investi. Un ratio faible (<2%) correspond à une entreprise qui réinvestit ses profits. Un ratio moyen (2 à 5%) correspond à une entreprise mature qui équilibre croissance et distribution. Un ratio élevé (>6%) est attractif mais dangereux.")
-                    row2 = st.container(border=True, width="stretch")
-                    row2.markdown(":moneybag: **Rendement** = évolution du cours de l'action sur 1 an")
-                    row2.write("Il reflète l'évaluation de l'entreprise par le marché en fonction de ces résultats (croissance, marges, dette) passés et à venir. Un rendement faible (<5%) indique une sous-performance ou un risque perçu. Un rendement moyen (5 à 15%) indique une perception équilibrée, neutre. Un rendement élevé (>15%) indique la présence d'un catalyseur et un fort niveau de confiance.")
-                    row3 = st.container(border=True, width="stretch")
-                    row3.markdown(":moneybag: **Volatilité** = écart-type des variations de prix")
-                    row3.write("La volatilité est un indicateur direct du risque qui traduit l'incertitude et la sensibilité aux événements. Une volatilité faible (<15%) indique un actif stable et prévisible. Une volatilité moyenne (15 à 30%) correspond à un actif normal. Une volatilité élevée (>30%) indique une entreprise cyclique ou en transformation et un sentiment de marché instable")
-                # -- Colonne de droite : Graphique du cours du jour
-                try:
-                    fig_day = plot_intraday(data.day_vue, data.action_suivie)
-                    col2.plotly_chart(fig_day, width=500, height="content")
-                except:
-                    col2.write("**Evolution du cours du jour**")
-                    col2.write("Données indisponibles")
-            # -- Partie basse : Graphique de l'évolution à 12 mois
-            with st.container(border=True, height=600):
-                try:
-                    fig_year = plot_1year(data.year_vue, data.action_suivie)
-                    st.plotly_chart(fig_year, width="stretch", height="stretch")
-                except:
-                    st.write("**Evolution du cours sur 12 mois**")
-                    st.write("Données indisponibles")
-    except:
-        st.header(f"Données financières indisponibles pour {selected_ticker['Ticker'].iloc[0]} - {selected_ticker['Name'].iloc[0]}")
 else:
-    st.header("Choisir le titre à afficher dans la liste sur le côté")
+    st.header("⬅️ Saisir ou sélectionner le titre à afficher")
+# -- Affichage des résultats --
+try:
+    # -- Chargement des données yfinance --
+    data = charge_donnees_bourse(ticker)
+    # -- Calcul des scores de performance
+    df_scores = df_seuils.copy()
+    df_scores['valeur'] = df_scores.apply(lambda row: safe_get_value(data.indicateurs, row["indicateur"]), axis=1)
+    df_scores['score'] = df_scores.apply(lambda row: score(row['valeur'], row['obj_min'], row['obj_max'], row['cat_min'], row['cat_max']), axis=1)
+    df_scores_categories = score_categorie(df_scores, df_poids)
+    df_score_global = score_global(df_scores_categories, df_poids)
+    df_extremes = scores_extremes(df_scores)
+    # -- Header --
+    st.title(f"{data.action_suivie.info['longName']}")
+    st.write(f"ISIN: {data.action_suivie.isin} | Symbole: {data.action_suivie.info['symbol']}")
+    # -- corps --
+    with st.container():
+        # -- Partie haute : Affichage données financières et cours du jour
+        with st.container(height=620):
+            col1, col2 = st.columns([0.6, 0.4], gap="small", border=True)
+            # -- Colonne de gauche : Onglets de présentation des données et analyses financières
+            tab1, tab2, tab3, tab4 = col1.tabs(["Indicateurs financiers", "Recommandations", "Informations société", "Définitions"])
+            # -- Indicateurs financiers
+            with tab1.container(gap="xsmall", border=False, width="stretch", height=500):
+                # -- Indicateurs monétaires
+                with st.container(horizontal=True, border=True, width="stretch"):
+                    m1, m2, m3, m4 = st.columns(4, width="stretch")
+                    actual = f"{data.day_vue["Close"].iloc[-1]:.{2 if data.day_vue["Close"].iloc[-1] >= 10 else 4}f} €"
+                    evol = data.day_vue["Close"].iloc[-1] / data.day_vue["Close"].iloc[0] - 1
+                    m1.metric("Cours actuel", actual, evol, format="percent")                            
+                    m2.metric('Cours moyen / 1 an', data.indicateurs['Cours moyen / 1 an'], f"{data.indicateurs['Delta cours moyen'].iloc[0] * 100:.2f} %", format="euro")
+                    m3.metric('MA50', data.indicateurs['MA50'], f"{data.indicateurs['Delta MA50'].iloc[0] * 100:.2f} %", format="euro")
+                    m4.metric('ATH / 1 an', data.indicateurs['ATH / 1 an'], f"{data.indicateurs['Delta ATH'].iloc[0] * 100:.2f} %", format="euro")
+                # -- Dividendes et ratios
+                with st.container(horizontal=True, border=True, width="stretch"):
+                    d1, r1, r2, r3 = st.columns(4, width="stretch")
+                    d1.metric('Dividendes', data.indicateurs['Dividendes'], format="euro")
+                    r1.metric('Div %', f"{data.indicateurs['Div %'].iloc[0] * 100:.2f} %", icon=data.risque['Div %'].iloc[0])
+                    r2.metric('Rendement', f"{data.indicateurs['Rendement'].iloc[0] * 100:.2f} %", icon=data.risque['Rendement'].iloc[0])
+                    r3.metric('Volatilité', f"{data.indicateurs['Volatilité'].iloc[0] * 100:.2f} %", icon=data.risque['Volatilité'].iloc[0])
+                # -- Objectifs et recommandations
+                with st.container(horizontal=True, border=True, width="stretch"):
+                    obj, reco = st.columns(2, width="stretch")
+                    try:
+                        fig_obj = plot_objectif(data.action_suivie)
+                        obj.plotly_chart(fig_obj, width="stretch", height=200, config={"displayModeBar": False})
+                    except:
+                        obj.write("**Objectifs de cours**")
+                        obj.write("Données indisponibles")
+                    try:
+                        fig_reco = plot_recommendations(data.action_suivie)
+                        reco.plotly_chart(fig_reco, width="stretch", height=200, config={"displayModeBar": False})
+                    except:
+                        reco.write("**Recommandations des analystes**")
+                        reco.write("Données indisponibles")
+            # -- Recommandation calculée
+            with tab2.container(gap="xxsmall", border=False, width="stretch", height=500):
+                df_column_config = {'Recommandation': st.column_config.TextColumn("Recommandation", alignment="center"),
+                                    'Smiley': st.column_config.TextColumn("", alignment="center")}
+                col_reco1, col_reco2, col_reco3 = st.columns(3, gap="xsmall", border=True)
+                # -- Recommandation Profil Prudent
+                with col_reco1:
+                    try:
+                        df_reco = df_score_global[['Recommandation','Smiley']].loc[df_score_global['profil'] == 'prudent']
+                        df_reco = df_reco.style.map(color_reco, subset=['Recommandation'])
+                        df_cat = df_scores_categories[['categorie','score_categorie']].loc[df_scores_categories['profil'] == 'prudent']
+                        fig_cat = plot_categories(df_cat)
+                        st.markdown("🛡️ **Profil Prudent**")
+                        st.dataframe(df_reco, column_config = df_column_config, width="stretch", hide_index=True)
+                        st.plotly_chart(fig_cat, width="stretch", height=140, config={"displayModeBar": False})
+                        df_p = df_extremes[df_extremes['profil'] == 'prudent']
+                        for _, row in df_p.iterrows():
+                            afficher_extreme(indicateur=row['indicateur'], valeur=row['valeur'], type_score=row['type'])
+                    except:
+                        st.markdown("🛡️ **Profil Prudent**")
+                        st.write("Recommandations indisponibles")
+                # -- Recommandation Profil Equilibré
+                with col_reco2:
+                    try:
+                        df_reco = df_score_global[['Recommandation','Smiley']].loc[df_score_global['profil'] == 'équilibré']
+                        df_reco = df_reco.style.map(color_reco, subset=['Recommandation'])
+                        df_cat = df_scores_categories[['categorie','score_categorie']].loc[df_scores_categories['profil'] == 'équilibré']
+                        fig_cat = plot_categories(df_cat)
+                        st.markdown("⚖️ **Profil Equilibré**")
+                        st.dataframe(df_reco, column_config = df_column_config, width="stretch", hide_index=True)
+                        st.plotly_chart(fig_cat, width="stretch", height=140, config={"displayModeBar": False})
+                        df_p = df_extremes[df_extremes['profil'] == 'équilibré']
+                        for _, row in df_p.iterrows():
+                            afficher_extreme(indicateur=row['indicateur'], valeur=row['valeur'], type_score=row['type'])
+                    except:
+                        st.markdown("⚖️ **Profil Equilibré**")
+                        st.write("Recommandations indisponibles")
+                # -- Recommandation Profil Dynamique
+                with col_reco3:
+                    try:
+                        df_reco = df_score_global[['Recommandation','Smiley']].loc[df_score_global['profil'] == 'dynamique']
+                        df_reco = df_reco.style.map(color_reco, subset=['Recommandation'])
+                        df_cat = df_scores_categories[['categorie','score_categorie']].loc[df_scores_categories['profil'] == 'dynamique']
+                        fig_cat = plot_categories(df_cat)
+                        st.markdown("🚀 **Profil Dynamique**")
+                        st.dataframe(df_reco, column_config = df_column_config, width="stretch", hide_index=True)
+                        st.plotly_chart(fig_cat, width="stretch", height=140, config={"displayModeBar": False})
+                        df_p = df_extremes[df_extremes['profil'] == 'dynamique']
+                        for _, row in df_p.iterrows():
+                            afficher_extreme(indicateur=row['indicateur'], valeur=row['valeur'], type_score=row['type'])
+                    except:
+                        st.markdown("🚀 **Profil Dynamique**")
+                        st.write("Recommandations indisponibles")
+            # -- Informations sur la société
+            with tab3.container(gap="xxsmall", border=False, width="stretch", height=500):
+                col_info1, col_info2 = st.columns(2, gap="small", border=True)
+                # -- Informations générales
+                with col_info1.container(border=False, width="stretch", height=460):
+                    try:
+                        st.subheader(data.action_suivie.info['sectorDisp'])
+                    except:
+                        st.write("Secteur inconnu")
+                    try:
+                        st.write(data.action_suivie.info['longBusinessSummary'])
+                    except:
+                        st.write("Informations indisponibles")
+                # -- Perspectives CA et EPS
+                try:
+                    fig_rev = plot_revenue(data.action_suivie)
+                    col_info2.plotly_chart(fig_rev, width="stretch", height=200, config={"displayModeBar": False})
+                except:
+                    col_info2.write("**Perspectives de croissance du CA**")
+                    col_info2.write("Données indisponibles")
+                try:
+                    fig_eps = plot_EPS(data.action_suivie)
+                    col_info2.plotly_chart(fig_eps, width="stretch", height=200, config={"displayModeBar": False})
+                except:
+                    col_info2.write("**Prévisions de Bénéfice par action**")
+                    col_info2.write("Données indisponibles")
+            # -- Définitions des ratios
+            with tab4.container(gap="xxsmall", border=False, width="stretch", height=500):
+                row1 = st.container(border=True, width="stretch")
+                row1.markdown(":moneybag: **Div %** = dividendes / cours moyen sur 1 an")
+                row1.write("Mesure directe des bénéfices pour l'investisseur par rapport au montant investi. Un ratio faible (<2%) correspond à une entreprise qui réinvestit ses profits. Un ratio moyen (2 à 5%) correspond à une entreprise mature qui équilibre croissance et distribution. Un ratio élevé (>6%) est attractif mais dangereux.")
+                row2 = st.container(border=True, width="stretch")
+                row2.markdown(":moneybag: **Rendement** = évolution du cours de l'action sur 1 an")
+                row2.write("Il reflète l'évaluation de l'entreprise par le marché en fonction de ces résultats (croissance, marges, dette) passés et à venir. Un rendement faible (<5%) indique une sous-performance ou un risque perçu. Un rendement moyen (5 à 15%) indique une perception équilibrée, neutre. Un rendement élevé (>15%) indique la présence d'un catalyseur et un fort niveau de confiance.")
+                row3 = st.container(border=True, width="stretch")
+                row3.markdown(":moneybag: **Volatilité** = écart-type des variations de prix")
+                row3.write("La volatilité est un indicateur direct du risque qui traduit l'incertitude et la sensibilité aux événements. Une volatilité faible (<15%) indique un actif stable et prévisible. Une volatilité moyenne (15 à 30%) correspond à un actif normal. Une volatilité élevée (>30%) indique une entreprise cyclique ou en transformation et un sentiment de marché instable")
+            # -- Colonne de droite : Graphique du cours du jour
+            try:
+                fig_day = plot_intraday(data.day_vue, data.action_suivie)
+                col2.plotly_chart(fig_day, width=500, height="content")
+            except:
+                col2.write("**Evolution du cours du jour**")
+                col2.write("Données indisponibles")
+        # -- Partie basse : Graphique de l'évolution à 12 mois
+        with st.container(border=True, height=600):
+            try:
+                fig_year = plot_1year(data.year_vue, data.action_suivie)
+                st.plotly_chart(fig_year, width="stretch", height="stretch")
+            except:
+                st.write("**Evolution du cours sur 12 mois**")
+                st.write("Données indisponibles")
+except: # -- Problème de récupération des données financières
+    try:
+        if ticker: # Un titre a été sélectionné
+            st.header(f"Données financières indisponibles")
+            if input_ticker: # Le titre a été saisi manuellement
+                st.subheader(f"Vérifier le symbole saisi : {input_ticker}")
+            else: # Le titre a été sélectionné dans la liste
+                st.subheader(f"{ticker} - {selected_name}")
+    except: # Aucun titre n'a été sélectionné
+        st.markdown(":red[*Aucun titre sélectionné*]")
